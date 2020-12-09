@@ -1,0 +1,56 @@
+---
+title: An MRP Model for the 2019 Canadian Election with Imputation of Missing Votes
+date: December 21 2020
+author: -redacted-
+#author: Steven Tran
+urlcolor: blue
+---
+
+---
+references:
+- id: ces2019_web
+  title: 2019 Canadian Election Study
+  author:
+  - family: Stephenson
+    given: Laura B
+  - family: Harell
+    given: Allison
+  - family: Rubenson
+    given: Daniel
+  - family: Loewen
+    given: Peter John
+  container-title: Harvard Dataverse
+  volume: 1
+  URL: 'https://doi.org/10.7910/DVN/DUS88V'
+  DOI: 10.7910/DVN/DUS88V
+  type: dataset
+  issued:
+    year: 2020
+
+nocite: '@*'
+---
+
+The supporting code and data for this report are available at this Git repository: -redacted-
+<!--[https://github.com/st-tran/sta304-final-project](https://github.com/st-tran/sta304-final-project)-->
+
+# Keywords
+
+MRP, multilevel, logistic, regression, poststratification, 2019, election, imputation, census, survey, Canadian
+
+# Introduction
+
+The Canadian Election Study is a regular study on "Canadians' political behaviour and attitudes" [@ces2019_web] that has been a rich source of data on political affiliations across demographics since 1965. However, many respondents choose not to answer questions about who they vote for or respond that they spoiled their vote ^[A spoiled vote is a vote marked as invalid for various reasons, such as improperly filling out a ballot] altogether, leading to missing data in statistical models to predict the popular vote. The goal of this report is to impute the missing data and include it in a multinomial logistical regression model with poststratification using Canadian census data to obtain the log-odd-ratios of winning the election for each party if everybody had voted. 
+
+# Methodology (Data and Model) 
+
+# Results 
+
+# Discussion
+
+# References
+
+<div id="refs"></div>
+
+# Appendix
+
+...
