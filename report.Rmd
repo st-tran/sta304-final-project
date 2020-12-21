@@ -1,8 +1,14 @@
 ---
-title: An MRP Model for the 2019 Canadian Election with Imputation of Missing Votes
-date: December 21 2020
-author: -redacted-
-#author: Steven Tran
+title: "An MRP Model for the 2019 Canadian Election with Imputation of Missing Votes"
+author: "Steven Tran"
+date: "December 22 2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{float, array}
+- \usepackage[bottom]{footmisc}
 urlcolor: blue
 ---
 
@@ -30,8 +36,139 @@ references:
 nocite: '@*'
 ---
 
-The supporting code and data for this report are available at this Git repository: -redacted-
-<!--[https://github.com/st-tran/sta304-final-project](https://github.com/st-tran/sta304-final-project)-->
+```{r deps, echo=F, include=F, warning=F}
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(forcats)
+library(survey)
+library(tab)
+library(knitr)
+library(kableExtra)
+```
+
+```{r get_data, cache=T, echo=F, include=F, warning=F}
+ces <- dget("./data/ces")
+gss <- read.csv("./data/gss.csv")
+```
+
+```{r process_data, cache=T, echo=F, include=F, warning=F}
+format_sig <- function(vals) {
+    fmt <- function(p) {
+        cast <- as.numeric(p)
+        if (!is.na(cast)) {
+            p %>% paste(case_when(cast < 0.01 ~ "** ",
+                                  cast < 0.05 ~ "*  ",
+                                  T ~ "   ")) %>%
+            return
+        } else if (p == "<0.001") {
+            p %>% paste("***") %>% return
+        } else {
+            p %>% paste("   ") %>% return
+        }
+    }
+    lapply(vals, fmt) %>% return
+}
+ces_sub <- ces %>%
+    select(cps19_bornin_canada,
+           cps19_province,
+           cps19_education,
+           cps19_household,
+           cps19_age,
+           cps19_income_number,
+           cps19_gender,
+           pes19_votechoice2019,
+           cps19_weight_general_all) %>%
+    rename_with(function(x) sub("^.+?_", "", x)) %>%
+    filter(!is.na(votechoice2019)) %>%
+    filter(!is.na(household)) %>%
+    filter(!is.na(income_number)) %>%
+    filter(!is.na(education)) %>%
+    rowwise %>%
+    mutate(voted_liberal=votechoice2019=="Liberal Party",
+           voted_conservative=votechoice2019=="Conservative Party",
+           education = case_when(education == "Some university" ~ "High school",
+                                 education == "Completed secondary/ high school" ~ "High school",
+                                 education == "Some technical, community college, CEGEP, College Classique" ~ "High school",
+                                 education == "Some elementary school" ~ "Less than high school",
+                                 education == "No schooling" ~ "Less than high school",
+                                 education == "Completed elementary school" ~ "Less than high school",
+                                 education == "Some secondary/ high school" ~ "Less than high school",
+                                 education == "Completed technical, community college, CEGEP, College Classique" ~ "College",
+                                 education == "Bachelor's degree" ~ "Bachelor's degree",
+                                 education == "Master's degree" ~ "Above bachelor's level",
+                                 education == "Professional degree or doctorate" ~ "Above bachelor's level",
+                                 ),
+           household = case_when(household >= 6 ~ 6,
+                                 T ~ household)) %>%
+    rename(weight=weight_general_all)
+
+ces_sub <- droplevels(ces_sub[which(ces_sub$gender!="Other (e.g. Trans, non-binary, two-spirit, gender-queer)"),])
+ces_sub <- droplevels(ces_sub[-which(ces_sub$province %in% c("Yukon", "Northwest Territories", "Nunavut")),])
+ces_sub <- droplevels(ces_sub[which(ces_sub$bornin_canada != "Don't know/ Prefer not to say"),])
+ces_sub$income_number <- ces_sub$income_number %>% cut(c(0, 25000, 50000, 75000, 100000, 125000, .Machine$double.xmax),
+                              labels=c("Less than $25,000",
+                                       "$25,000 to $49,999",
+                                       "$50,000 to $74,999",
+                                       "$75,000 to $99,999",
+                                       "$100,000 to $124,999",
+                                       "$125,000 and more"),
+                              right=F)
+ces_sub$education <- factor(ces_sub$education, levels=c("Less than high school",
+                                                        "High school",
+                                                        "College",
+                                                        "Bachelor's degree",
+                                                        "Above bachelor's level"))
+ces_sub$bornin_canada <- factor(ces_sub$bornin_canada, levels=c("No", "Yes"))
+ces_sub <- ces_sub %>% rename(income=income_number) %>% select(-votechoice2019)
+
+gss_sub <- gss %>% select(place_birth_canada,
+                          province,
+                          education,
+                          hh_size,
+                          age,
+                          income_family,
+                          is_male) %>%
+mutate(education = case_when(education == "Bachelor's degree (e.g. B.A., B.Sc., LL.B.)" ~ "Bachelor's degree",
+                             education == "College, CEGEP or other non-university certificate or di..." ~ "College",
+                             education == "High school diploma or a high school equivalency certificate" ~ "High school",
+                             education == "Less than high school diploma or its equivalent" ~ "Less than high school",
+                             education == "Trade certificate or diploma" ~ "College",
+                             education == "University certificate or diploma below the bachelor's level" ~ "Bachelor's degree",
+                             education == "University certificate, diploma or degree above the bach..." ~ "Above bachelor's level"
+                             ),
+       income_family = case_when(income_family == "$100,000 to $ 124,999" ~ "$100,000 to $124,999",
+                                 T ~ as.character(income_family)),
+       age=round(age),
+       gender=case_when(is_male == 0 ~ "A woman",
+                        is_male == 1 ~ "A man"),
+       place_birth_canada = case_when(place_birth_canada == "Born in Canada" ~ "Yes",
+                                      T ~ "No")) %>%
+rename(income=income_family) %>%
+select(-c(is_male))
+
+gss_sub <- gss_sub[gss_sub$place_birth_canada != "Don't know",]
+gss_sub$place_birth_canada <- factor(gss_sub$place_birth_canada)
+gss_sub$education <- factor(gss_sub$education, levels=c("Less than high school",
+                                                        "High school",
+                                                        "College",
+                                                        "Bachelor's degree",
+                                                        "Above bachelor's level"))
+gss_sub$province <- factor(gss_sub$province, levels=levels(ces_sub$province))
+gss_sub$income <- factor(gss_sub$income, levels=levels(ces_sub$income))
+gss_sub$gender <- factor(gss_sub$gender, levels=levels(ces_sub$gender))
+gss_sub <- gss_sub %>%
+    filter(!is.na(education)) %>%
+    count(place_birth_canada, province, education, hh_size, age, income, gender) %>%
+    group_by(place_birth_canada, province, education, hh_size, age, income, gender) %>%
+    rename(bornin_canada=place_birth_canada, household=hh_size)
+```
+
+The supporting code and data for this report are available at this Git repository: https://github.com/st-tran/sta304-final-project](https://github.com/st-tran/sta304-final-project)
+
+# Abstract
+
+This report takes variables from survey data, including the respondents' province of residence, income, whether they were born in Canada, highest level of education attained, their gender, age, how many people live in their household, and use them as cells for poststratification of two logistic models that are fitted to predict the outcome of the 2019 Canadian Federal Election if everyone had voted. Voter turnout is an issue in many elections as competing parties for the majority vote are frequently close to each other. 
 
 # Keywords
 
@@ -39,18 +176,165 @@ MRP, multilevel, logistic, regression, poststratification, 2019, election, imput
 
 # Introduction
 
-The Canadian Election Study is a regular study on "Canadians' political behaviour and attitudes" [@ces2019_web] that has been a rich source of data on political affiliations across demographics since 1965. However, many respondents choose not to answer questions about who they vote for or respond that they spoiled their vote ^[A spoiled vote is a vote marked as invalid for various reasons, such as improperly filling out a ballot] altogether, leading to missing data in statistical models to predict the popular vote. The goal of this report is to impute the missing data and include it in a multinomial logistical regression model with poststratification using Canadian census data to obtain the log-odd-ratios of winning the election for each party if everybody had voted. 
+The Canadian Election Study (CES) is a regular study on "Canadians' political behaviour and attitudes" [@ces2019_web] that has been a rich source of data on political affiliations across demographics since 1965. However, many respondents choose not to answer questions about who they vote for or respond that they spoiled their vote ^[A spoiled vote is a vote marked as invalid for various reasons, such as improperly filling out a ballot] altogether, leading to missing data in statistical models to predict the popular vote. An additional issue common to surveys is that, due to sampling biases, the sampling frame is not representative of the target population of voting-age Canadians, so poststratification is key to adjust for this.
 
-# Methodology (Data and Model) 
+Logistic regression models are a natural fit for predicting binary outcomes because the predicted value, once transformed, is a valid probability. First-Past-the-Post, Canada's electoral system, tends to produce single-party majority governments, so a simple majority vote is employed. The goal of this report is to impute the missing data and include it in a multinomial logistical regression model with poststratification using Canadian census data to obtain the log-odd-ratios of winning the election for each party if everybody had voted.
 
-# Results 
+In the Methodology section, variables are selected from the two datasets and organized in order to make a matching between cells. Two logistic regression models are fitted to predict the probability that the Liberals won as well as the probability that the Conservatives won (the two leading parties), and then poststratified using weights. The results, inferences, and conclusions are presented in the Results and Conclusion sections. 
+
+# Methodology
+
+## Data
+
+In order to fit a model for the election outcome, the predictor variables below were selected from the CES survey and ordinal categorical variables were converted into levelled factors:
+
+- `province`: nominal; describes the province where the respondent resides
+    - Ontario, British Columbia, Alberta, Newfoundland and Labrador, Saskatchewan, Prince Edward Island, Quebec, Nova Scotia, New Brunswick, Manitoba
+- `income`: ordinal; income of respondent
+    - Less than \$25,000 (baseline)
+    - \$25,000 to \$49,999
+    - \$50,000 to \$74,999
+    - \$75,000 to \$99,999
+    - \$100,000 to \$124,999
+    - \$125,000 and more
+- `bornin_canada`: ordinal; describes whether the respondent was born in Canada
+    - No (baseline)
+    - Yes
+- `education`: ordinal; highest level of education attained by the respondent
+    - Less than high school (baseline)
+    - High school
+    - College
+    - Bachelor's degree
+    - Above bachelor's level
+- `gender`: ordinal; gender of respondent ^[TODO: note about gender]
+    - A man (baseline)
+    - A woman
+- `age`: quantitative; age of respondent
+- `household`: quantitative; describes how many people live in the respondent's household
+
+The equivalent variables were selected from the GSS dataset used for later use in post-stratification to adjust the survey data to the population characteristics.
+
+## Model
+
+Next, two multilevel regression models were fitted to the CES data, using two more variables:
+
+- `weight`: quantitative; CES-assigned weights for the respondent
+
+`r ces_sub %>% select(age, household, weight) %>% map_df(summary) %>% cbind(c("age", "household", "weight"), .) %>% setNames(c(" ", colnames(.)[2:7])) %>% kable %>% kable_styling(position = "center")`
+
+- `votechoice`: nominal; the party which the respondent voted for in the 2019 Canadian Election
+    `r ces$cps19_votechoice %>% 
+        gsub("Bloc.*", "Bloc Quebecois", .) %>% 
+        gsub("Another.*", "Another party", .) %>% 
+        gsub("Don't know.*", "Don't know...", .) %>% 
+        table %>% data.frame %>% 
+        setnames(c("Party", "Votes")) %>% 
+        arrange(desc(Votes)) %>%
+        kable(row.names=F) %>%
+        kable_styling(position = "center")`
+
+The Liberal Party and Conservative Party competed for the majority vote, so the `votechoice` variable was converted into two variables `voted_conservative` and `voted_liberal`, both of which have binary outcomes. The two models are given by (where \`party' is one of the aforementioned parties):
+\begin{align*}
+    \ln \left(\frac{P_{\text{party}}}{1-P_{\text{party}}}\right) &= \beta_0 + \beta_{\text{age}}x_{\text{age}} + \beta_{\text{household}}x_{\text{household}} \\
+                                       &+ \sum_{\substack{
+                                               i\in \text{gender}, \\
+                                               i\neq \text{`male'}
+                                               }}{\beta_ix_i} + \sum_{\substack{
+                                               i\in \text{education}, \\
+                                               i\neq \text{`Less than high school'}
+                                       }}{\beta_ix_i} + \sum_{\substack{
+                                               i\in \text{bornin\_canada}, \\
+                                               i\neq \text{`No'}
+                                       }}{\beta_ix_i} \\
+                                       &+ \sum_{\substack{
+                                               i\in \text{income}, \\
+                                               i\neq \text{`Less than \$25,000'}
+                                       }}{\beta_ix_i} + \sum_{\substack{
+                                               i\in \text{province}, \\
+                                               i\neq \text{`Ontario'}
+                                       }}{\beta_ix_i} 
+\end{align*}
+
+Here, there is an intercept term $\beta_0$ which represents the log-odds of voting for a particular party when all other variables are at baseline (the respondent's age is 0 and nobody lives with them, they are male, haven't finished high school, weren't born in Canada, make less than \$25,000, and live in Ontario). In this context, it isn't meaningful due to such individuals being ineligible to vote in Canada. The quantitative variables `age` and `household` have coefficient terms $\beta_{\text{age}}$ and $\beta_{\text{household}}$ which represent the average change in log odds for a unit increase in each with all other variables held constant, respectively. The remaining variables, which are expressed as sums, use one-hot coding that represents the change in log odds compared to the baseline if the categorical variable of concern moves to the 'next' level; refer to the Data section for the order of these factors.
+
+Associated with the model are the Wald test statistics and corresponding $P$-values for each of the individual regression coefficients under the null hypothesis that the regression coefficient is equal to zero. 
+
+# Results
+
+The coefficients of the fitted models can be seen in Table [...]. Across them, many of the predictor variables are similar in terms of statistical significance -- that is, a variable that's statistically significant in the model that predicts the Liberal Party's log-odds of winning the election is statistically significant in the model that predicts the Conservative Party's log-odds of winning. 
+
+
+```{r fit_model, echo=F}
+model.design <- svydesign(ids=~1, data=ces_sub, weights=~weight)
+liberal_model <- svyglm(voted_liberal ~ bornin_canada + province + education + household + age + income + gender,
+                        family=quasibinomial,
+                        design=model.design)
+conservative_model <- svyglm(voted_conservative ~ bornin_canada + province + education + household + age + income + gender,
+                        family=quasibinomial,
+                        design=model.design)
+```
+
+```{r print_model, echo=F}
+libraw <- liberal_model %>%
+    tabglm(latex=T, columns=c("or", "beta.se", "p"))
+suppressWarnings(libraw$P <- libraw$P %>% format_sig)
+libraw$Variable <- lapply(libraw$Variable, function(x) gsub("\\\\ \\\\ \\\\", "--- ", x))
+consraw <- conservative_model %>%
+    tabglm(latex=T, columns=c("or", "beta.se", "p"))
+suppressWarnings(consraw$P <- consraw$P %>% format_sig)
+consraw <- consraw[names(consraw)!="Variable"]
+cbind(libraw, consraw) %>%
+    kable %>%
+    kable_styling(position = "center") %>%
+    column_spec(column=4, latex_column_spec="l|") %>%
+    add_header_above(c(" ", "Liberal Model"=3, "Conservative Model"=3), align="c", bold=T, font_size=11)
+```
+
+Some variables that are highly statistically significant at standard thresholds of 0.001, 0.01, and 0.05 are the province in which the respondent resides, the highest level of education attained, and their gender. These all make sense in reality and they reaffirm some intuition:
+
+- Certain provinces have specific facts of living such as common industries, laws, and recreational activities which may influence voter opinions on parties that are for or against policies that govern them. For example, Alberta's oil reserves are among the largest in the world, so the topic is likely to be divisive in that province. The same can be said about the topic of fishing in the Atlantic provinces or farming in Saskatchewan.
+- People who are highly educated may be more willing to support Liberal policies on education, which tend to give more to students who are in need of financial aid. Those who haven't reached the same levels of postsecondary education may hold the opinion that taxpayers shouldn't foot the bill, viewing programs such as Ontario's OSAP as extravagant unnecessities.
+
+Some variables that are notably insignificant are `income` in the Liberal model and `bornin_canada` in both models. The interpretations of these may be that, among those who voted for the Liberal Party, income didn't significantly impact their decision, and likewise for whether or not they were born in Canada. 
+
+```{r pred_gss, echo=F}
+gss_sub$cons_logodds <- conservative_model %>%
+    predict(newdata=gss_sub)
+gss_sub$cons_estimate <- exp(gss_sub$cons_logodds)/(1+exp(gss_sub$cons_logodds))
+cons_prop <- gss_sub %>% ungroup %>%
+    mutate(prop=cons_estimate*n) %>%
+    summarise(pred=sum(prop)/sum(n))
+gss_sub$libs_logodds <- liberal_model %>%
+    predict(newdata=gss_sub)
+gss_sub$libs_estimate <- exp(gss_sub$libs_logodds)/(1+exp(gss_sub$libs_logodds))
+libs_prop <- gss_sub %>% ungroup %>%
+    mutate(prop=libs_estimate*n) %>%
+    summarise(pred=sum(prop)/sum(n))
+```
+
+By poststratifying the models across the defined cells in order to predict the log-odd voting outcomes, the following values were computed:
+
+- The Conservative Party would earn `r cons_prop` of the votes
+- The Liberal Party would earn `r libs_prop` of the votes
 
 # Discussion
 
+## Summary & Conclusions
+
+The results of this report show that the Liberal Party would be predicted to be the winners if everybody voted in the 2019 Canadian Federal Election, with `r format((libs_prop - cons_prop)*100, digits=3)`% more votes. In reality, the Liberals won a minority government with 157 seats and 33.12% of the popular vote compared to the Conservative Party's 121 seats and 34.34% of the popular vote. By adjusting the weights within each cell across a number of predictors, the models were more representative of the Canadian population.
+
+It was found that a person's province of residence, highest level of education attained, and their gender is very important in determining who they would vote for. Income and age are less important for those who vote for Liberals than Conservatives, and other factors, such as whether they were born in Canada and the number of people in a household, are not statistically significant. 
+
+With these facts in mind, there is evidence that the decreased voter turnout may have negatively affected the Liberal Party's chance at achieving a majority government. Under the two fitted models, the majority vote swung in favour of the Liberals.
+
+## Weaknesses & Next Steps
+
+\newpage
 # References
 
 <div id="refs"></div>
 
+<!--
+\newpage
 # Appendix
-
-...
+-->
