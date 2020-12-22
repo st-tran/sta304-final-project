@@ -7,44 +7,25 @@ output:
   html_document:
     df_print: paged
 header-includes:
-- \usepackage{float, array}
+- \usepackage{longtable, booktabs, array, floatrow}
 - \usepackage[bottom]{footmisc}
+- \floatsetup[figure]{capposition=top}
+- \floatsetup[table]{capposition=top}
 urlcolor: blue
----
-
----
-references:
-- id: ces2019_web
-  title: 2019 Canadian Election Study
-  author:
-  - family: Stephenson
-    given: Laura B
-  - family: Harell
-    given: Allison
-  - family: Rubenson
-    given: Daniel
-  - family: Loewen
-    given: Peter John
-  container-title: Harvard Dataverse
-  volume: 1
-  URL: 'https://doi.org/10.7910/DVN/DUS88V'
-  DOI: 10.7910/DVN/DUS88V
-  type: dataset
-  issued:
-    year: 2020
-
+bibliography: bibliography.bibtex
 nocite: '@*'
 ---
 
 ```{r deps, echo=F, include=F, warning=F}
 library(tidyverse)
-library(dplyr)
 library(data.table)
 library(forcats)
 library(survey)
 library(tab)
 library(knitr)
 library(kableExtra)
+library(ggplot2)
+library(gridExtra)
 ```
 
 ```{r get_data, cache=T, echo=F, include=F, warning=F}
@@ -53,7 +34,7 @@ gss <- read.csv("./data/gss.csv")
 ```
 
 ```{r process_data, cache=T, echo=F, include=F, warning=F}
-format_sig <- function(vals) {
+format_sig <- function(vals) { # Function to add significance asterisks to 0.001, 0.01, 0.05 levels
     fmt <- function(p) {
         cast <- as.numeric(p)
         if (!is.na(cast)) {
@@ -70,7 +51,7 @@ format_sig <- function(vals) {
     lapply(vals, fmt) %>% return
 }
 ces_sub <- ces %>%
-    select(cps19_bornin_canada,
+    select(cps19_bornin_canada, # subset ces
            cps19_province,
            cps19_education,
            cps19_household,
@@ -79,13 +60,13 @@ ces_sub <- ces %>%
            cps19_gender,
            pes19_votechoice2019,
            cps19_weight_general_all) %>%
-    rename_with(function(x) sub("^.+?_", "", x)) %>%
-    filter(!is.na(votechoice2019)) %>%
+    rename_with(function(x) sub("^.+?_", "", x)) %>% # remove cps19 and pes19 prefixes
+    filter(!is.na(votechoice2019)) %>% # remove nas
     filter(!is.na(household)) %>%
     filter(!is.na(income_number)) %>%
     filter(!is.na(education)) %>%
     rowwise %>%
-    mutate(voted_liberal=votechoice2019=="Liberal Party",
+    mutate(voted_liberal=votechoice2019=="Liberal Party", # clean into categories
            voted_conservative=votechoice2019=="Conservative Party",
            education = case_when(education == "Some university" ~ "High school",
                                  education == "Completed secondary/ high school" ~ "High school",
@@ -103,9 +84,12 @@ ces_sub <- ces %>%
                                  T ~ household)) %>%
     rename(weight=weight_general_all)
 
+# remove options that wouldnt lead to a binjection with gss
 ces_sub <- droplevels(ces_sub[which(ces_sub$gender!="Other (e.g. Trans, non-binary, two-spirit, gender-queer)"),])
 ces_sub <- droplevels(ces_sub[-which(ces_sub$province %in% c("Yukon", "Northwest Territories", "Nunavut")),])
 ces_sub <- droplevels(ces_sub[which(ces_sub$bornin_canada != "Don't know/ Prefer not to say"),])
+
+# convert inc into bins
 ces_sub$income_number <- ces_sub$income_number %>% cut(c(0, 25000, 50000, 75000, 100000, 125000, .Machine$double.xmax),
                               labels=c("Less than $25,000",
                                        "$25,000 to $49,999",
@@ -114,6 +98,7 @@ ces_sub$income_number <- ces_sub$income_number %>% cut(c(0, 25000, 50000, 75000,
                                        "$100,000 to $124,999",
                                        "$125,000 and more"),
                               right=F)
+
 ces_sub$education <- factor(ces_sub$education, levels=c("Less than high school",
                                                         "High school",
                                                         "College",
@@ -122,7 +107,7 @@ ces_sub$education <- factor(ces_sub$education, levels=c("Less than high school",
 ces_sub$bornin_canada <- factor(ces_sub$bornin_canada, levels=c("No", "Yes"))
 ces_sub <- ces_sub %>% rename(income=income_number) %>% select(-votechoice2019)
 
-gss_sub <- gss %>% select(place_birth_canada,
+gss_sub <- gss %>% select(place_birth_canada, # subset gss
                           province,
                           education,
                           hh_size,
@@ -176,7 +161,7 @@ MRP, multilevel, logistic, regression, poststratification, 2019, election, imput
 
 # Introduction
 
-The Canadian Election Study (CES) is a regular study on "Canadians' political behaviour and attitudes" [@ces2019_web] that has been a rich source of data on political affiliations across demographics since 1965. However, many respondents choose not to answer questions about who they vote for or respond that they spoiled their vote ^[A spoiled vote is a vote marked as invalid for various reasons, such as improperly filling out a ballot] altogether, leading to missing data in statistical models to predict the popular vote. An additional issue common to surveys is that, due to sampling biases, the sampling frame is not representative of the target population of voting-age Canadians, so poststratification is key to adjust for this.
+The Canadian Election Study (CES) is a regular study on "Canadians' political behaviour and attitudes" [@ces] that has been a rich source of data on political affiliations across demographics since 1965. However, many respondents choose not to answer questions about who they vote for or respond that they spoiled their vote ^[A spoiled vote is a vote marked as invalid for various reasons, such as improperly filling out a ballot] altogether, leading to missing data in statistical models to predict the popular vote. An additional issue common to surveys is that, due to sampling biases, the sampling frame is not representative of the target population of voting-age Canadians, so poststratification is key to adjust for this.
 
 Logistic regression models are a natural fit for predicting binary outcomes because the predicted value, once transformed, is a valid probability. First-Past-the-Post, Canada's electoral system, tends to produce single-party majority governments, so a simple majority vote is employed. The goal of this report is to impute the missing data and include it in a multinomial logistical regression model with poststratification using Canadian census data to obtain the log-odd-ratios of winning the election for each party if everybody had voted.
 
@@ -206,13 +191,36 @@ In order to fit a model for the election outcome, the predictor variables below 
     - College
     - Bachelor's degree
     - Above bachelor's level
-- `gender`: ordinal; gender of respondent ^[TODO: note about gender]
+- `gender`: ordinal; gender of respondent ^[The CES dataset only included a binary option for this variable. The GSS dataset was cleaned such that other options were removed.]
     - A man (baseline)
     - A woman
+  
+
+```{r, echo=F, fig.width=8.5, fig.height=11, fig.cap="Counts of Categorical Variables"}
+grid.arrange(ggplot(data=ces_sub, aes(x=province)) + geom_bar() + ggtitle("Province counts") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)), 
+             ggplot(data=ces_sub, aes(x=income)) + 
+                 geom_bar() + 
+                 ggtitle("Income counts") + 
+                 theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)), 
+             ggplot(data=ces_sub, aes(x=bornin_canada)) + 
+                 geom_bar() + 
+                 ggtitle("bornin_canada counts") + 
+                 theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)),
+             ggplot(data=ces_sub, aes(x=education)) + 
+                 geom_bar() + ggtitle("Education counts") + 
+                 theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)), 
+             ggplot(data=ces_sub, aes(x=gender)) + 
+                 geom_bar() + ggtitle("Gender counts") + 
+                 theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)), 
+             ncol=2)
+```
+
 - `age`: quantitative; age of respondent
 - `household`: quantitative; describes how many people live in the respondent's household
 
-The equivalent variables were selected from the GSS dataset used for later use in post-stratification to adjust the survey data to the population characteristics.
+The equivalent variables were selected from the 2017 General Social Survey about Canadian citizens [@gss] for later use in post-stratification to adjust the survey data to the population characteristics.
+
+`r ces_sub %>% select(age, household, weight) %>% map_df(summary) %>% cbind(c("age", "household", "weight"), .) %>% setNames(c(" ", colnames(.)[2:7])) %>% kable(booktabs=T, caption="Distributions of Numerical Variables") %>% kable_styling(position = "center")`
 
 ## Model
 
@@ -220,18 +228,19 @@ Next, two multilevel regression models were fitted to the CES data, using two mo
 
 - `weight`: quantitative; CES-assigned weights for the respondent
 
-`r ces_sub %>% select(age, household, weight) %>% map_df(summary) %>% cbind(c("age", "household", "weight"), .) %>% setNames(c(" ", colnames(.)[2:7])) %>% kable %>% kable_styling(position = "center")`
-
 - `votechoice`: nominal; the party which the respondent voted for in the 2019 Canadian Election
-    `r ces$cps19_votechoice %>% 
-        gsub("Bloc.*", "Bloc Quebecois", .) %>% 
-        gsub("Another.*", "Another party", .) %>% 
-        gsub("Don't know.*", "Don't know...", .) %>% 
-        table %>% data.frame %>% 
-        setnames(c("Party", "Votes")) %>% 
-        arrange(desc(Votes)) %>%
-        kable(row.names=F) %>%
-        kable_styling(position = "center")`
+
+```{r echo=F}
+ces$cps19_votechoice %>% 
+    gsub("Bloc.*", "Bloc Quebecois", .) %>% 
+    gsub("Another.*", "Another party", .) %>% 
+    gsub("Don't know.*", "Don't know...", .) %>% 
+    table %>% data.frame %>% 
+    setnames(c("Party", "Votes")) %>% 
+    arrange(desc(Votes)) %>%
+    kable(caption="CES Party Vote Counts") %>%
+    kable_styling(position = "center")
+```
 
 The Liberal Party and Conservative Party competed for the majority vote, so the `votechoice` variable was converted into two variables `voted_conservative` and `voted_liberal`, both of which have binary outcomes. The two models are given by (where \`party' is one of the aforementioned parties):
 \begin{align*}
@@ -284,7 +293,7 @@ consraw <- conservative_model %>%
 suppressWarnings(consraw$P <- consraw$P %>% format_sig)
 consraw <- consraw[names(consraw)!="Variable"]
 cbind(libraw, consraw) %>%
-    kable %>%
+    kable(booktabs=T, caption="Fitted Liberal and Conservative Models") %>%
     kable_styling(position = "center") %>%
     column_spec(column=4, latex_column_spec="l|") %>%
     add_header_above(c(" ", "Liberal Model"=3, "Conservative Model"=3), align="c", bold=T, font_size=11)
@@ -321,15 +330,26 @@ By poststratifying the models across the defined cells in order to predict the l
 
 ## Summary & Conclusions
 
-The results of this report show that the Liberal Party would be predicted to be the winners if everybody voted in the 2019 Canadian Federal Election, with `r format((libs_prop - cons_prop)*100, digits=3)`% more votes. In reality, the Liberals won a minority government with 157 seats and 33.12% of the popular vote compared to the Conservative Party's 121 seats and 34.34% of the popular vote. By adjusting the weights within each cell across a number of predictors, the models were more representative of the Canadian population.
+The results of this report show that the Liberal Party would be predicted to be the winners if everybody voted in the 2019 Canadian Federal Election, with `r format((libs_prop - cons_prop)*100, digits=3)`% more votes. In reality, the Liberals won a minority government with 157 seats and 33.12% of the popular vote compared to the Conservative Party's 121 seats and 34.34% of the popular vote [@cbcnews]. By adjusting the weights within each cell across a number of predictors, the models were more representative of the Canadian population.
 
 It was found that a person's province of residence, highest level of education attained, and their gender is very important in determining who they would vote for. Income and age are less important for those who vote for Liberals than Conservatives, and other factors, such as whether they were born in Canada and the number of people in a household, are not statistically significant. 
 
 With these facts in mind, there is evidence that the decreased voter turnout may have negatively affected the Liberal Party's chance at achieving a majority government. Under the two fitted models, the majority vote swung in favour of the Liberals.
 
-## Weaknesses & Next Steps
+## Weaknesses
 
-\newpage
+There were some assumptions made about the problem to be analyzed and inherent flaws of the datasets that were used. Accordingly, there may be further steps needed to improve the model or even other models that better utilize the data.
+
+1. As discussed, the Canadian electoral system doesn't simply take the party with the majority vote to be the winner of the election [@electionscanada_2020]. Indeed, the Conservative Party gained the majority vote in reality but did not win the election [@cbcnews]. It may be possible to further stratify the population based on the survey respondents' electoral districts if that data exists, as it was seen that the broad stratum based on the respondents' provinces of residence led to statistically significant regression coefficients. It is unlikely that this data exists for privacy concerns.
+2. There were a number of `NA` and non-response answers for the predictor variables (as well as the vote choice variable, but that was a non-issue), which reduced the size of the datasets.
+3. There may be more useful variables across the two datasets that may have been useful. However, cleaning the data into matching cells becomes cumbersome as the number of variables increases.
+
+## Next Steps
+
+1. A model that incorporates mixed or fixed effects could be explored for variables that are heterogeneous across strata and homogeneous within each stratum. If this were the case for any variable used in the model, then the fitted coefficient would not be accurate -- using a random intercept model would remedy this as each level of the variable would have a different coefficient.
+2. A follow-up survey could be conducted which includes more specific information about the respondents' demographics.
+3. More variables could be included in the model initially, and then employ stepwise variable selection such as AIC or BIC to retain the variables that are useful in predicting the election outcome over and above the others, and remove those that are not useful.
+
 # References
 
 <div id="refs"></div>
