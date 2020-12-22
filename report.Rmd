@@ -1,5 +1,5 @@
 ---
-title: "An MRP Model for the 2019 Canadian Election with Imputation of Missing Votes"
+title: "A Poststratified Logistic Model for the 2019 Canadian Election"
 author: "Steven Tran"
 date: "December 22 2020"
 output:
@@ -149,7 +149,7 @@ gss_sub <- gss_sub %>%
     rename(bornin_canada=place_birth_canada, household=hh_size)
 ```
 
-The supporting code and data for this report are available at this Git repository: https://github.com/st-tran/sta304-final-project](https://github.com/st-tran/sta304-final-project)
+The supporting code and data for this report are available at this Git repository: [https://github.com/st-tran/sta304-final-project](https://github.com/st-tran/sta304-final-project)
 
 # Abstract
 
